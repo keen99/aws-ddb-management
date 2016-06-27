@@ -17,7 +17,9 @@
  */
 package com.cfelde.aws.ddb.management;
 
-import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.util.StringUtils;
+import com.amazonaws.regions.Region;
+import com.amazonaws.regions.Regions;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatch;
 import com.amazonaws.services.cloudwatch.AmazonCloudWatchClient;
 import com.amazonaws.services.cloudwatch.model.Datapoint;
@@ -77,6 +79,7 @@ public class TableThroughput {
     private final int minWriteLimit, maxWriteLimit;
 
     // Measurement period in minutes
+    // period of time the look at history, nothing related to run time
     private final int period = 60 * 5;
 
     // Throttled multiplier
@@ -104,15 +107,44 @@ public class TableThroughput {
     public static void main(String... args) {
         loadPartitionState();
 
-        // TODO: All these parameters should be loaded from a config file!
-        String accessKey = "YOUR ACCESS KEY";
-        String secretKey = "YOUR SECRET KEY";
+        // just use the default credential chain - http://docs.aws.amazon.com/AWSSdkDocsJava/latest/DeveloperGuide/credentials.html
+        // https://github.com/aws/aws-sdk-java/blob/master/aws-java-sdk-core/src/main/java/com/amazonaws/auth/DefaultAWSCredentialsProviderChain.java
+        AmazonCloudWatch client = new AmazonCloudWatchClient();
+        AmazonDynamoDBClient ddb = new AmazonDynamoDBClient();
 
-        AmazonCloudWatch client = new AmazonCloudWatchClient(new BasicAWSCredentials(accessKey, secretKey));
-        AmazonDynamoDBClient ddb = new AmazonDynamoDBClient(new BasicAWSCredentials(accessKey, secretKey));
 
-        client.setEndpoint("https://monitoring.eu-west-1.amazonaws.com");
-        ddb.setEndpoint("https://dynamodb.eu-west-1.amazonaws.com");
+        // Lets use roughly the same chain for regions, but there's nothing friendly for it.
+        // every other SDK uses this
+        String awsRegionEnv = StringUtils.trim(System.getenv("AWS_REGION"));
+        // cli and lambda uses this
+        String awsDefaultRegionEnv = StringUtils.trim(System.getenv("AWS_DEFAULT_REGION"));
+        // if we prefer a property
+        String awsRegionProperty = StringUtils.trim(System.getProperty("aws.region"));
+        // we dont support the instance profile case right now...
+
+        if (!StringUtils.isNullOrEmpty(awsRegionEnv)) {
+            Regions region = Regions.fromName(awsRegionEnv);
+            ddb.setRegion(Region.getRegion(region));
+            client.setRegion(Region.getRegion(region));
+        } else if (!StringUtils.isNullOrEmpty(awsDefaultRegionEnv)) {
+            Regions region = Regions.fromName(awsDefaultRegionEnv);
+            ddb.setRegion(Region.getRegion(region));
+            client.setRegion(Region.getRegion(region));
+        } else if (!StringUtils.isNullOrEmpty(awsRegionProperty)) {
+            Regions region = Regions.fromName(awsRegionProperty);
+            ddb.setRegion(Region.getRegion(region));
+            client.setRegion(Region.getRegion(region));
+        // try the we're-on-an-ec2-instance case.  dunno how to make this work
+        // skipping it for now.
+        // } else if (!StringUtils.isNullOrEmpty(awsCurrentRegion)) {
+        //     region = awsCurrentRegion;
+        //     ddb.setRegion(Region.getRegion(region));
+        //     client.setRegion(Region.getRegion(region));
+        } else {
+          throw new IllegalArgumentException(
+            "ERROR: AWS region not configured - set AWS_REGION or AWS_DEFAULT_REGION environment variable or set aws.region java property"
+          );
+        }
 
         // Do one per table you want to manage
         initTableThroughput(client, ddb, "table1", 2, 100, 2, 100);
